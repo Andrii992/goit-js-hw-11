@@ -1,90 +1,78 @@
-import '../css/main.css';
-import APIService from './fetchImages';
-import SimpleLightbox from 'simplelightbox';
-import 'simplelightbox/dist/simple-lightbox.min.css';
-import Notiflix from 'notiflix';
+import './css/styles.css';
+import { FetchImagesService } from './js/fetchImagesService';
+import { refs } from './js/getRefs';
+import { LoadMoreBtn } from './js/load-more-btn';
+import { makeImageMarkup } from './js/markupService';
+import { Notify } from 'notiflix/build/notiflix-notify-aio';
+import SimpleLightbox from "simplelightbox";
+import "simplelightbox/dist/simple-lightbox.min.css";
 
-const form = document.querySelector('.search-form');
-const loadMore = document.querySelector('.load-more');
-const galleryImages = document.querySelector('.gallery');
-const apiService = new APIService();
 
-form.addEventListener('submit', onSearch);
-loadMore.addEventListener('click', onLoadMore);
+const fetchImagesService = new FetchImagesService();
+const loadMoreBtn = new LoadMoreBtn({ selektor: '.load-more', hidden: true });
+const lightbox = new SimpleLightbox('.gallery a', { captionDelay
+    : 250,
+});
 
-loadMore.setAttribute(`disabled`, true);
-loadMore.classList.add('hidden');
 
-function onSearch(event) {
-  event.preventDefault();
-  apiService.searchQuery = event.target.elements.searchQuery.value;
-  const inputV = apiService.searchQuery.trim();
-  if (inputV === '') {
-    return;
-  }
-  loadMore.setAttribute(`disabled`, true);
-  // loadMore.classList.add('hidden')
+function onSearch(e) {
+    e.preventDefault();
 
-  apiService.resetPage();
-  apiService.fetchHits().then(data => {
-    const imagesHits = data.totalHits;
-    Notiflix.Notify.success(`Hooray! We found ${imagesHits} images`);
-    galleryImages.innerHTML = '';
-    const hits = data.hits;
-    render(hits);
-    lightbox.refresh();
-    // console.log(imagesHits)
-    apiService.incrementCountHits(imagesHits)
-    loadMore.removeAttribute(`disabled`, true);
-    loadMore.classList.remove('hidden');
-  });
-}
-
-function onLoadMore() {
-  apiService.fetchHits().then(data => {
-    render(data.hits);
-    lightbox.refresh();
-    const renderedMarkup = document.querySelectorAll('.photo-card');
-    // console.log(renderedMarkup.length)
-    // console.log(apiService.totalRenderHits)
-    if (renderedMarkup.length >= apiService.totalRenderHits) {
-      Notiflix.Notify.info("We're sorry, but you've reached the end of search results.");
-      loadMore.setAttribute(`disabled`, true);
+    const currentWord = e.currentTarget.elements.searchQuery.value.trim();
+    if (currentWord === '') {
+        return Notify.info(`Enter a word to search for images.`);
     }
-    // console.log(totalHits)
-  });
+    fetchImagesService.searchQuery = currentWord;
+    loadMoreBtn.show();
+    fetchImagesService.resetPage();
+    clearImageContainer();
+    fetchImages();
 }
 
-function render(data) {
-  const markup = data
-    .map(({ largeImageURL, webformatURL, tags, likes, views, comments, downloads }) => {
-      return `
-  <a class='photo-card' href="${largeImageURL}">
-  <div class="img-wrapper">
-    <img src='${webformatURL}' alt='${tags}' loading='lazy' />
-  </div>
-  <div class='info'>
-    <p class='info-item'>
-      <b>Likes</b>
-      <span>${likes}</span>
-    </p>
-    <p class='info-item'>
-      <b>Views</b>
-      <span>${views}</span>
-    </p>
-    <p class='info-item'>
-      <b>Comments</b>
-      <span>${comments}</span>
-    </p>
-    <p class='info-item'>
-      <b>Downloads</b>
-      <span>${downloads}</span>
-    </p>
-  </div>
-</a>`;
-    })
-    .join('');
-  galleryImages.insertAdjacentHTML('beforeend', markup);
+function clearImageContainer() {
+    refs.containerDiv.innerHTML = '';
 }
 
-const lightbox = new SimpleLightbox('.gallery a');
+function fetchImages() {
+    loadMoreBtn.disabled();
+    fetchImagesService.fetchImages().then(({data}) => {
+        if (data.total === 0) {
+            Notify.info(`Sorry, there are no images matching your search query: ${fetchImagesService.searchQuery}. Please try again.`);
+            loadMoreBtn.hide();
+            return;
+        }
+        appendImagesMarkup(data);
+        onPageScrolling()
+        lightbox.refresh();
+        const { totalHits } = data;
+
+        if (refs.containerDiv.children.length === totalHits ) {
+            Notify.info(`We're sorry, but you've reached the end of search results.`);
+            loadMoreBtn.hide();
+        } else {
+            loadMoreBtn.enable();
+            Notify.success(`Hooray! We found ${totalHits} images.`);
+        }
+    }).catch(handleError);
+}
+
+function handleError() {
+    console.log('Error!');
+}
+
+function appendImagesMarkup(data) {
+    refs.containerDiv.insertAdjacentHTML('beforeend', makeImageMarkup(data));
+}
+
+//  Плавная прокрутка страницы после запроса и отрисовки каждой следующей группы изображений
+function onPageScrolling(){ 
+    const { height: cardHeight } = refs.containerDiv
+        .firstElementChild.getBoundingClientRect();
+        window.scrollBy({
+        top: cardHeight * 2,
+        behavior: "smooth",
+        });
+}
+
+refs.formSearch.addEventListener('submit', onSearch);
+loadMoreBtn.refs.button.addEventListener('click', fetchImages);
